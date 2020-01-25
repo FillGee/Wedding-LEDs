@@ -8,17 +8,26 @@ extern "C" {
 #define WIFI_CHANNEL 1
 
 //uint8_t hue = 0; //a byte for the hue color
-byte hue[1];
+//byte hue[1];
 
 #define NUM_LEDS 16
 #define DATA_PIN 2
 CRGBArray<NUM_LEDS> leds;
+
+struct data 
+{
+  byte displayMode;
+  byte hue;
+  byte saturation;
+  byte brightness;
+} recv_data;
 
 void setup() 
 {
   Serial.begin(115200);
   
   FastLED.addLeds<WS2812, DATA_PIN, GRB>(leds, NUM_LEDS);
+  FastLED.setBrightness(150);
   
   WiFi.mode(WIFI_STA); //we need to start off in wifi station mode to initialize MAC addresses and such
   WiFi.begin();
@@ -38,11 +47,11 @@ void setup()
 
   esp_now_register_recv_cb([](uint8_t *mac, uint8_t *data, uint8_t len) //this is the "function" that receives data and does something with it
   {
-  memcpy(&hue, data, 1); //copy the data that was received into our hue array, 1 byte long.
+  memcpy(&recv_data, data, 4); //copy the data that was received into our recv_data struct, 4 bytes long
   Serial.print("Message received: ");
-  Serial.println(hue[0]);
+  Serial.println(recv_data.hue);
   moveRight(1);
-  leds[0] = CHSV(hue[0], 255, 20);
+  leds[0] = CHSV(recv_data.hue, recv_data.saturation, recv_data.brightness);
   //fill_solid(leds, NUM_LEDS, CHSV(hue[0], 255, 20));
   FastLED.show();
   });

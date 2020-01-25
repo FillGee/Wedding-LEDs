@@ -14,7 +14,15 @@ extern "C" {
 static uint8_t slaveMACs[] = { 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF }; //setup the MAC address for the slaves allowing pseudo multicast. 
 //the esp8266 is not supposed to have multicast, but setting the slaveMacs as this seems to work just fine and broadcast to multiple at the same time.
 
-byte hue[1]; //a 1 byte array to store hue color. Seems to need to be an array due to how the send function wants a pointer and byte length, not an actual value
+struct data 
+{
+  byte displayMode;
+  byte hue;
+  byte saturation;
+  byte brightness;
+} send_data;
+
+//byte hue[1]; //a 1 byte array to store hue color. Seems to need to be an array due to how the send function wants a pointer and byte length, not an actual value
 
 //FastLED neopixel ring info
 #define NUM_LEDS 16
@@ -88,7 +96,7 @@ byte averageFrequency()
   float totalLevel = 0.000001;
   for(int i = 0; i < 8; i++)
   {
-    if (audioAmplitudes[i] > 40) //only count it if its above base noise level
+    if (audioAmplitudes[i] > 150) //only count it if its above base noise level, 50 is background noise
     {
       averageFreq += ((i+1) * audioAmplitudes[i]); //add up the amplitudes, multiplied by the frequency band
       totalLevel += audioAmplitudes[i]; 
@@ -97,10 +105,17 @@ byte averageFrequency()
   averageFreq = averageFreq / totalLevel;
   Serial.print("Average Frequency band: ");
   Serial.print(averageFreq);
-  byte resultHue = map(averageFreq, 1, 8, 0, 255);
+  Serial.print(" Total Loudness: ");
+  Serial.print(totalLevel);
+  send_data.displayMode = 0;
+  send_data.hue =  map(averageFreq, 1, 8, 0, 255);
+  send_data.saturation = 255;
+  send_data.brightness = map(totalLevel, 0, 2000, 0, 255);
   Serial.print(" Result hue: ");
-  Serial.println(resultHue);
-  return resultHue;
+  Serial.print(send_data.hue);
+  Serial.print(" Brightness: ");
+  Serial.println(send_data.brightness);
+  
 }
 void loop() 
 {
@@ -117,7 +132,7 @@ void loop()
     //fill_solid(leds, NUM_LEDS, CHSV(hue[0], 255, 20));
     //FastLED.show();
   //}
-  EVERY_N_MILLISECONDS(75)
+  EVERY_N_MILLISECONDS(15)
   {
     for (int i = 0; i < 8; i++)
     {
@@ -128,8 +143,10 @@ void loop()
       Serial.print(" | ");
     }
     Serial.println();
-    hue[0] = averageFrequency();
-    byte sendResult = esp_now_send(NULL, hue, 1); //send the random hue, which is one byte in size, to all peers
+    averageFrequency();
+    uint8_t bs[4];
+    memcpy(bs, &send_data, 4); //copy the send data into a bullshit array in order to be able to send successfully?
+    byte sendResult = esp_now_send(NULL, bs, 4); //send the send_data struct variable, which is 4 bytes in size, to all peers
     Serial.println();
   }  
 }

@@ -1,6 +1,8 @@
 //This is the file that should run on the one "master" node-mcu amica. It will be taking in data from the MSGEQ7s and calculating a hue to send out to the other node-mcus
 //Because these are ESP8266 they dont directly support multicast, and a lot of the stuff you find online doesnt work because its meant for the esp-32s
 
+//board should be setup as the node-mcu 1.0
+
 extern "C" {
   #include <espnow.h>
   #include "user_interface.h"
@@ -20,9 +22,12 @@ struct data
   byte hue;
   byte saturation;
   byte brightness;
+  byte red;
+  byte green;
+  byte blue;
 } send_data;
 
-//byte hue[1]; //a 1 byte array to store hue color. Seems to need to be an array due to how the send function wants a pointer and byte length, not an actual value
+uint8_t bs[7]; //define/make a new "bullshit" array that will essentially just house the send_data above for use in broadcast
 
 //FastLED neopixel ring info
 #define NUM_LEDS 16
@@ -30,12 +35,15 @@ struct data
 CRGBArray<NUM_LEDS> leds; //make the CRGBArray and call it "leds" this time
 
 //pins for the MSGEQ7
-#define STROBE 4
-#define RESET 5
+#define STROBE 14 //D5
+#define RESET 12 //D6
 #define AUDIO_DATA A0
 
 int freq;
 int audioAmplitudes[7];
+
+CRGB avgColor;
+CRGB oldAvgColor;
 
 void setup() 
 {
@@ -96,7 +104,7 @@ byte averageFrequency()
   float totalLevel = 0.000001;
   for(int i = 0; i < 8; i++)
   {
-    if (audioAmplitudes[i] > 150) //only count it if its above base noise level, 50 is background noise
+    if (audioAmplitudes[i] > 100) //only count it if its above base noise level, 50 is background noise
     {
       averageFreq += ((i+1) * audioAmplitudes[i]); //add up the amplitudes, multiplied by the frequency band
       totalLevel += audioAmplitudes[i]; 
@@ -108,15 +116,113 @@ byte averageFrequency()
   Serial.print(" Total Loudness: ");
   Serial.print(totalLevel);
   send_data.displayMode = 0;
-  send_data.hue =  map(averageFreq, 1, 8, 0, 255);
+  send_data.hue =  map(averageFreq, 1, 7, 0, 255);
   send_data.saturation = 255;
-  send_data.brightness = map(totalLevel, 0, 2000, 0, 255);
+  send_data.brightness = map(totalLevel, 0, 5000, 0, 255);
   Serial.print(" Result hue: ");
   Serial.print(send_data.hue);
   Serial.print(" Brightness: ");
   Serial.println(send_data.brightness);
   
 }
+
+void addSingleColorPixel()
+{
+   //find the frequencies with the highest amplitude and just calculate the color based on that?
+  int maximum = 0;
+  int secondMax = 0;
+  int thirdMax = 0;
+  int maxIndex = 0;
+  int secondMaxIndex = 0;
+  int thirdMaxIndex = 0;
+  float totalLevel = 0.000001;
+
+  for (int i=0; i<7; i++)
+  {
+    if (audioAmplitudes[i] > maximum)
+    {
+      thirdMax = secondMax;
+      thirdMaxIndex = secondMaxIndex;
+      //put the old max value in secondMax so we can get the second highest value
+      secondMax = maximum;
+      secondMaxIndex = maxIndex;
+      //store this new max value
+      maximum = audioAmplitudes[i];
+      maxIndex = i;
+    }
+    if (audioAmplitudes[i] > 100) //50-80 is basically background noise
+    {
+    totalLevel += audioAmplitudes[i]; //calculate the total "loudness" of each reading
+    }
+  }
+
+
+  oldAvgColor = avgColor; //take the most recent average color and store it here so we can use it to blend
+  avgColor = CRGB(0,0,0); //reset the average color to nothing so we can add stuff from scratch
+
+  calculateColor(maxIndex, maximum, 0.7); //the maximum freqeuncy gets to set the color with .70 effectiveness
+  calculateColor(secondMaxIndex, secondMax, 0.35); //the second to the max gets to add their color,but only .35 effectiveness
+  calculateColor(thirdMaxIndex, thirdMax, 0.25); //lastly the third to max adds theirs with .25 effectiveness
+
+  avgColor = blend(oldAvgColor, avgColor, 128); //we can take the color between the last color and the current one to get more of a smooth gradient between colors instead of jumps from red > green etc
+  //moveRight(1);
+  //stripLEDs[0] = CRGB(avgColor.red, avgColor.green, avgColor.blue); //sets the first pixel to the "average" color of the song at that moment. Then use move right to move it down the chain
+  //fill_solid(stripLEDs,NUM_LEDS, CRGB(avgColor.red, avgColor.green, avgColor.blue)); //sets the whole strip to the "average" color, which will then flash to the next when its calculated.
+  //fill_gradient_RGB(stripLEDs, 0, avgColor, NUM_LEDS-1, oldAvgColor); //should make a gradient from the new color on the start to the old color on the end? Doesnt seem to work
+  //FastLED.show();
+  //delayMicroseconds(75);
+
+  send_data.displayMode = 0;
+  send_data.red = avgColor.red;
+  send_data.green = avgColor.green;
+  send_data.blue = avgColor.blue;
+  //send_data.hue =  avgColor.hue;
+  send_data.saturation = 255;
+  send_data.brightness = map(totalLevel, 0, 5000, 0, 255);
+  Serial.print(" Brightness: ");
+  Serial.println(send_data.brightness);
+}
+
+void calculateColor(int band, int value, float multiplier)
+{
+  int topValue = 220;
+  int twoThirds = 150;
+  int oneThirds = 90;
+  float blueShift = 0.70; //literally just turn the blue values to this percent so its not so overpowering
+  float greenShift = 1.8; //increase the heck out of greens because theres not enough of them usually
+  float redShift = 0.70; //red multiplier, could maybe turn it down a tad but I like it
+
+  switch(band)
+  {
+    case 0:
+      avgColor.red = qadd8(avgColor.red , (map(value, 0, 1024, 0, (topValue * redShift)) * multiplier));
+      break;
+    case 1:
+      avgColor.red = qadd8(avgColor.red , (map(value, 0, 1024, 0, (twoThirds * redShift)) * multiplier));
+      avgColor.blue = qadd8(avgColor.blue , (map(value, 0, 1024, 0, (oneThirds * blueShift)) * multiplier));
+      break;
+    case 2:
+      avgColor.red = qadd8(avgColor.red , (map(value, 0, 1024, 0, (oneThirds * redShift)) * multiplier));
+      avgColor.blue = qadd8(avgColor.blue , (map(value, 0, 1024, 0, (twoThirds * blueShift)) * multiplier));
+      break;
+    case 3:
+      avgColor.blue = qadd8(avgColor.blue , (map(value, 0, 1024, 0, (topValue * blueShift)) * multiplier));
+      avgColor.green = qadd8(avgColor.green , (map(value, 0, 1024, 0, (oneThirds * greenShift)) * multiplier)); //even though this should only be blue, add some green otherwise the green end is very under-utilized
+      break;
+    case 4:
+      avgColor.blue = qadd8(avgColor.blue, (map(value, 0, 1024, 0, (twoThirds * blueShift)) * multiplier));
+      avgColor.green = qadd8(avgColor.green , (map(value, 0, 1024, 0, (oneThirds * greenShift)) * multiplier));
+      break;
+    case 5:
+      avgColor.blue = qadd8(avgColor.blue , (map(value, 0, 1024, 0, (oneThirds * blueShift)) * multiplier));
+      avgColor.green = qadd8(avgColor.green , (map(value, 0, 1024, 0, (twoThirds * greenShift)) * multiplier));
+      break;
+    case 6:
+      avgColor.green = qadd8(avgColor.green , (map(value, 0, 1024, 0, (topValue * greenShift)) * multiplier));
+      break;
+  }
+}
+
 void loop() 
 {
   //EVERY_N_MILLISECONDS(100)
@@ -132,9 +238,9 @@ void loop()
     //fill_solid(leds, NUM_LEDS, CHSV(hue[0], 255, 20));
     //FastLED.show();
   //}
-  EVERY_N_MILLISECONDS(15)
+  EVERY_N_MILLISECONDS(10)
   {
-    for (int i = 0; i < 8; i++)
+    for (int i = 0; i < 7; i++)
     {
       readAudio(i);
       Serial.print(i);
@@ -143,10 +249,11 @@ void loop()
       Serial.print(" | ");
     }
     Serial.println();
-    averageFrequency();
-    uint8_t bs[4];
-    memcpy(bs, &send_data, 4); //copy the send data into a bullshit array in order to be able to send successfully?
-    byte sendResult = esp_now_send(NULL, bs, 4); //send the send_data struct variable, which is 4 bytes in size, to all peers
+    //averageFrequency();
+    addSingleColorPixel();
+    
+    memcpy(bs, &send_data, 7); //copy the send data into a bullshit array in order to be able to send successfully?
+    byte sendResult = esp_now_send(NULL, bs, 7); //send the send_data struct variable, which is 7 bytes in size, to all peers
     Serial.println();
   }  
-}
+} 

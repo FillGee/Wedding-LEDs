@@ -3,7 +3,7 @@ extern "C" {
   #include "user_interface.h"
 }
 #include <ESP8266WiFi.h>
-#include <FastLED.h> //really wont need this in the final product, but its good to see it now for testing purposes
+#include <FastLED.h>
 
 #define WIFI_CHANNEL 1
 
@@ -14,12 +14,18 @@ extern "C" {
 #define DATA_PIN 2
 CRGBArray<NUM_LEDS> leds;
 
+uint8_t oldHue;
+uint8_t oldBrightness;
+
 struct data 
 {
   byte displayMode;
   byte hue;
   byte saturation;
   byte brightness;
+  byte red;
+  byte green;
+  byte blue;
 } recv_data;
 
 void setup() 
@@ -47,13 +53,29 @@ void setup()
 
   esp_now_register_recv_cb([](uint8_t *mac, uint8_t *data, uint8_t len) //this is the "function" that receives data and does something with it
   {
-  memcpy(&recv_data, data, 4); //copy the data that was received into our recv_data struct, 4 bytes long
-  Serial.print("Message received: ");
-  Serial.println(recv_data.hue);
-  moveRight(1);
-  leds[0] = CHSV(recv_data.hue, recv_data.saturation, recv_data.brightness);
-  //fill_solid(leds, NUM_LEDS, CHSV(hue[0], 255, 20));
-  FastLED.show();
+    //oldHue = recv_data.hue; //copy the previous hue into oldHue before it is overwritten with the new one
+    //oldBrightness = recv_data.brightness;
+    memcpy(&recv_data, data, 7); //copy the data that was received into our recv_data struct, 7 bytes long
+    //Serial.print("Message received: ");
+    //Serial.print(recv_data.hue);
+    //Serial.print(". Old hue: ");
+    //Serial.print(oldHue);
+    //Serial.print(". Blend: ");
+    //Serial.println((recv_data.hue + oldHue) / 2);
+    moveRight(1);
+    if (recv_data.brightness > 15) //it will sometimes be 15 or lower during random noise when there is no actual music playing
+    {
+      FastLED.setBrightness(recv_data.brightness);
+      Serial.println(recv_data.brightness);
+      leds[0] = CRGB(recv_data.red, recv_data.green, recv_data.blue);
+    }
+    FastLED.show();
+    //if (recv_data.brightness != 0 )
+    //{
+      //leds(0, NUM_LEDS) = CHSV(((recv_data.hue + oldHue) / 2), recv_data.saturation, ((recv_data.brightness + oldBrightness) / 2));
+      
+    //}
+    //fill_solid(leds, NUM_LEDS, CHSV(hue[0], 255, 20));
   });
 
   Serial.println("done");
@@ -65,9 +87,14 @@ void moveRight(int pixels)
   {    
     leds[j] = leds[j-pixels];
   }
+  //fadeToBlackBy(leds, NUM_LEDS, 4);
 }
 
 void loop()
 {
-  
+  EVERY_N_MILLISECONDS(5)
+  {
+    fadeToBlackBy(leds, NUM_LEDS, 1); //1/8th fade every 5ms. Might need to make more aggressive
+    FastLED.show();
+  }
 }

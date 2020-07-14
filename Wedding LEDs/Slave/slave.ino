@@ -16,6 +16,13 @@ CRGBArray<NUM_LEDS> leds;
 
 uint8_t oldHue;
 uint8_t oldBrightness;
+uint8_t oldRed;
+uint8_t oldGreen;
+uint8_t oldBlue;
+uint8_t rainbowHue = 0;
+uint8_t delayCounter = 0;
+uint8_t randomBrightness = random8();
+uint8_t usableBrightness = 0;
 
 struct data 
 {
@@ -54,28 +61,46 @@ void setup()
   esp_now_register_recv_cb([](uint8_t *mac, uint8_t *data, uint8_t len) //this is the "function" that receives data and does something with it
   {
     //oldHue = recv_data.hue; //copy the previous hue into oldHue before it is overwritten with the new one
-    //oldBrightness = recv_data.brightness;
+    oldBrightness = recv_data.brightness;
+    oldRed = recv_data.red;
+    oldGreen = recv_data.green;
+    oldBlue = recv_data.blue;
+    
     memcpy(&recv_data, data, 7); //copy the data that was received into our recv_data struct, 7 bytes long
-    //Serial.print("Message received: ");
-    //Serial.print(recv_data.hue);
-    //Serial.print(". Old hue: ");
-    //Serial.print(oldHue);
-    //Serial.print(". Blend: ");
-    //Serial.println((recv_data.hue + oldHue) / 2);
-    moveRight(1);
-    if (recv_data.brightness > 15) //it will sometimes be 15 or lower during random noise when there is no actual music playing
+
+    if (recv_data.displayMode == 0 )
     {
-      FastLED.setBrightness(recv_data.brightness);
-      Serial.println(recv_data.brightness);
-      leds[0] = CRGB(recv_data.red, recv_data.green, recv_data.blue);
+      EVERY_N_MILLISECONDS(20)
+      {
+        fadeToBlackBy(leds, NUM_LEDS, 2); 
+        FastLED.show();
+      }
+      //Serial.print("Message received: ");
+      //Serial.print(recv_data.hue);
+      //Serial.print(". Old hue: ");
+      //Serial.print(oldHue);
+      //Serial.print(". Blend: ");
+      //Serial.println((recv_data.hue + oldHue) / 2);
+      moveRight(1);
+      if (recv_data.brightness > 85) //it will sometimes be 15 or lower during random noise when there is no actual music playing
+      {
+        //FastLED.setBrightness(recv_data.brightness); //raw
+        FastLED.setBrightness((recv_data.brightness + oldBrightness ) / 2); //average blend between last pixel and now
+        //Serial.println(recv_data.brightness);
+        //leds[0] = CRGB(recv_data.red, recv_data.green, recv_data.blue); //raw
+        leds[0] = blend(CRGB(recv_data.red, recv_data.green, recv_data.blue), CRGB(oldRed, oldGreen, oldBlue), 128);// half blend
+      }
+      else
+      {
+        leds[0] = CRGB(0,0,0);
+      }
+      FastLED.show();
     }
-    FastLED.show();
-    //if (recv_data.brightness != 0 )
-    //{
-      //leds(0, NUM_LEDS) = CHSV(((recv_data.hue + oldHue) / 2), recv_data.saturation, ((recv_data.brightness + oldBrightness) / 2));
-      
-    //}
-    //fill_solid(leds, NUM_LEDS, CHSV(hue[0], 255, 20));
+    else if (recv_data.displayMode == 1)
+    {
+      rainbowFade();
+      //delayMicroseconds(100); 
+    }
   });
 
   Serial.println("done");
@@ -90,11 +115,40 @@ void moveRight(int pixels)
   //fadeToBlackBy(leds, NUM_LEDS, 4);
 }
 
+void rainbowFade()
+{
+  if (delayCounter > 9)
+  {
+    if (sin8(randomBrightness) > 200)
+    {
+      usableBrightness = 200;
+    }
+    else if (sin8(randomBrightness) < 100)
+    {
+      usableBrightness = 100;
+    }
+    else
+    {
+      usableBrightness = sin8(randomBrightness);
+    }
+    randomBrightness++;
+    delayCounter = 0;
+    leds[0] = CHSV(rainbowHue++, 255, usableBrightness);
+    moveRight(1);
+    FastLED.show();
+  }
+  else
+  {
+    delayCounter++;
+  }
+  Serial.println(delayCounter);
+}
+
 void loop()
 {
-  EVERY_N_MILLISECONDS(5)
+  EVERY_N_MILLISECONDS(20)
   {
-    fadeToBlackBy(leds, NUM_LEDS, 1); //1/8th fade every 5ms. Might need to make more aggressive
-    FastLED.show();
+    //fadeToBlackBy(leds, NUM_LEDS, 2); 
+    //FastLED.show();
   }
 }

@@ -39,8 +39,11 @@ CRGBArray<NUM_LEDS> leds; //make the CRGBArray and call it "leds" this time
 #define RESET 12 //D6
 #define AUDIO_DATA A0
 
+#define BUTTON 5 //D1
+
 int freq;
 int audioAmplitudes[7];
+uint8_t dMode = 1;
 
 CRGB avgColor;
 CRGB oldAvgColor;
@@ -52,6 +55,8 @@ void setup()
   pinMode(RESET, OUTPUT);
   digitalWrite(STROBE, HIGH);
   digitalWrite(RESET, HIGH);
+
+  pinMode(BUTTON, INPUT);
 
   //Get the MSGEQ7 ready for its first reading
   digitalWrite(STROBE, LOW);
@@ -115,7 +120,6 @@ byte averageFrequency()
   Serial.print(averageFreq);
   Serial.print(" Total Loudness: ");
   Serial.print(totalLevel);
-  send_data.displayMode = 0;
   send_data.hue =  map(averageFreq, 1, 7, 0, 255);
   send_data.saturation = 255;
   send_data.brightness = map(totalLevel, 0, 5000, 0, 255);
@@ -172,13 +176,13 @@ void addSingleColorPixel()
   //FastLED.show();
   //delayMicroseconds(75);
 
-  send_data.displayMode = 0;
+
   send_data.red = avgColor.red;
   send_data.green = avgColor.green;
   send_data.blue = avgColor.blue;
   //send_data.hue =  avgColor.hue;
   send_data.saturation = 255;
-  send_data.brightness = map(totalLevel, 0, 5000, 0, 255);
+  send_data.brightness = map(totalLevel, 0, 5000, 75, 255);
   Serial.print(" Brightness: ");
   Serial.println(send_data.brightness);
 }
@@ -225,6 +229,18 @@ void calculateColor(int band, int value, float multiplier)
 
 void loop() 
 {
+  byte val = digitalRead(BUTTON);
+  if (val == HIGH)
+  {
+    if (dMode == 0)
+    {
+      dMode = 1;
+    }
+    else
+    {
+      dMode = 0;
+    }
+  }
   //EVERY_N_MILLISECONDS(100)
   //{
     //hue[0] = random8(); //generate a random number between 0-255
@@ -238,7 +254,7 @@ void loop()
     //fill_solid(leds, NUM_LEDS, CHSV(hue[0], 255, 20));
     //FastLED.show();
   //}
-  EVERY_N_MILLISECONDS(10)
+  EVERY_N_MILLISECONDS(15) //10 is pretty flashy, might want to be a bit slower for less seizures?
   {
     for (int i = 0; i < 7; i++)
     {
@@ -251,7 +267,10 @@ void loop()
     Serial.println();
     //averageFrequency();
     addSingleColorPixel();
-    
+
+    send_data.displayMode = dMode; //display mode 0 is the music reactive
+    //send_data.displayMode = 1; //display mode 1 should be rainbow fade
+  
     memcpy(bs, &send_data, 7); //copy the send data into a bullshit array in order to be able to send successfully?
     byte sendResult = esp_now_send(NULL, bs, 7); //send the send_data struct variable, which is 7 bytes in size, to all peers
     Serial.println();
